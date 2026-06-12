@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot Agrícola</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    h1 { font-size: 1.1rem; margin-bottom: 4px; }
+
+    #estado-robot { margin-bottom: 16px; font-weight: bold; }
+
+    .contenedor {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    #mapa {
+      display: grid;
+      grid-template-columns: repeat(6, 48px);
+      gap: 3px;
+    }
+
+    .celda {
+      width: 48px;
+      height: 40px;
+      border: 1px solid #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+    }
+
+    .celda.humedo { background: #c8e6c9; }
+    .celda.seco   { background: #ffcdd2; }
+
+    #contador { margin-top: 6px; font-size: 0.85rem; }
+
+    #log {
+      width: 280px;
+      height: 260px;
+      border: 1px solid #999;
+      padding: 6px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    .botones { margin-top: 16px; display: flex; gap: 10px; }
+
+    button {
+      padding: 8px 20px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Robot Agrícola — Monitor</h1>
+  <div id="estado-robot">Cargando...</div>
+
+  <div class="contenedor">
+
+    <div>
+      <div style="font-size:0.8rem; margin-bottom:6px;">Mapa de humedad</div>
+      <div id="mapa"></div>
+      <div id="contador">Cuadrantes: 0 / 36</div>
+    </div>
+
+    <div>
+      <div style="font-size:0.8rem; margin-bottom:6px;">Log de mensajes</div>
+      <div id="log"></div>
+    </div>
+
+  </div>
+
+  <div class="botones">
+    <button id="btn-run"   onclick="enviarCmd('R')">▶ Run</button>
+    <button id="btn-pause" onclick="enviarCmd('P')">⏸ Pause</button>
+    <button id="btn-stop"  onclick="enviarCmd('S')">■ Stop</button>
+  </div>
+
+<script>
+  // ── Construir mapa ─────────────────────────────────────────
+  const mapaDiv = document.getElementById("mapa");
+  for (let i = 1; i <= 36; i++) {
+    const celda = document.createElement("div");
+    celda.className = "celda";
+    celda.id = `c${i}`;
+    celda.textContent = String(i).padStart(2, "0");
+    mapaDiv.appendChild(celda);
+  }
+
+  // ── Cargar estado inicial al abrir la página ───────────────
+  fetch("/estado")
+    .then(r => r.json())
+    .then(data => {
+      // Restaurar cuadrantes ya medidos
+      for (const [num, est] of Object.entries(data.cuadrantes)) {
+        if (est === "H" || est === "S") actualizarCelda(parseInt(num), est);
+      }
+      // Estado del robot
+      actualizarEstadoRobot(data.robot);
+      // Log previo
+      for (const linea of data.log) agregarLog(linea);
+    });
+
+  // ── Escuchar eventos SSE en tiempo real ────────────────────
+  const sse = new EventSource("/eventos");
+
+  sse.onmessage = (e) => {
+    const evento = JSON.parse(e.data);
+
+    if (evento.tipo === "cuadrante") {
+      actualizarCelda(evento.num, evento.estado);
+      agregarLog(evento.log);
+    }
+
+    if (evento.tipo === "estado") {
+      actualizarEstadoRobot(evento.robot);
+      agregarLog(evento.log);
+    }
+
+    if (evento.tipo === "log") {
+      agregarLog(evento.log);
+    }
+  };
+
+  sse.onerror = () => {
+    agregarLog("⚠ Conexión SSE perdida, reintentando...");
+  };
+
+  // ── Funciones de UI ────────────────────────────────────────
+  function actualizarCelda(num, estado) {
+    const celda = document.getElementById(`c${num}`);
+    if (!celda) return;
+    celda.classList.remove("humedo", "seco");
+    if (estado === "H") celda.classList.add("humedo");
+    if (estado === "S") celda.classList.add("seco");
+    const revisados = document.querySelectorAll(".celda.humedo, .celda.seco").length;
+    document.getElementById("contador").textContent = `Cuadrantes: ${revisados} / 36`;
+  }
+
+  function actualizarEstadoRobot(estado) {
+    const etiquetas = {
+      "DESCONECTADO": "Desconectado",
+      "CSTART":       "En curso",
+      "CPAUSE":       "Pausado",
+      "CSTOP":        "Detenido",
+      "CFIN":         "Mapeo completo",
+    };
+    document.getElementById("estado-robot").textContent =
+      "Estado: " + (etiquetas[estado] ?? estado);
+  }
+
+  function agregarLog(linea) {
+    const log = document.getElementById("log");
+    const p = document.createElement("div");
+    p.textContent = linea;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function enviarCmd(cmd) {
+    await fetch(`/comando/${cmd}`, { method: "POST" });
+  }
+</script>
+
+</body>
+</html>
