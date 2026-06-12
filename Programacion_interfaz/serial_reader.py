@@ -8,7 +8,6 @@ import serial.tools.list_ports
 import threading
 
 # Velocidad de comunicación con el Arduino (bits por segundo).
-# Debe coincidir exactamente con lo que tenga configurado el Arduino.
 BAUDIOS = 9600
 
 
@@ -16,20 +15,18 @@ def detectar_puerto():
     """
     Busca automáticamente en qué puerto USB está conectado el Arduino.
     Primero revisa los nombres de los puertos disponibles buscando palabras
-    clave típicas de Arduinos. Si no encuentra nada así, intenta abrir
+    clave típicas. Si no encuentra nada así, intenta abrir
     los puertos más comunes uno por uno hasta que alguno funcione.
     Devuelve la ruta del puerto (ej. '/dev/ttyUSB0') o None si no encontró nada.
     """
     # Paso 1: escanear todos los puertos serie del sistema
     for puerto in serial.tools.list_ports.comports():
-        # Si la descripción del puerto menciona "Arduino", "CH340" (chip USB muy
-        # común en clones), o los nombres de dispositivo típicos en Linux...
         if any(x in puerto.description for x in ("Arduino", "CH340", "ttyUSB", "ttyACM")):
             print(f"[SerialReader] Arduino detectado en {puerto.device}")
-            return puerto.device  # ¡Lo encontramos! Devolvemos su ruta
+            return puerto.device  # si se encuentra Devolvemos su ruta
 
     # Paso 2: si el escaneo no funcionó, intentar abrir los puertos más comunes
-    # en Linux a la fuerza (por si la descripción no tenía palabras clave)
+    # en Linux a la fuerza 
     for candidato in ("/dev/ttyUSB0", "/dev/ttyACM0", "/dev/ttyUSB1", "/dev/ttyACM1"):
         try:
             s = serial.Serial(candidato, BAUDIOS, timeout=1)
@@ -39,7 +36,7 @@ def detectar_puerto():
         except serial.SerialException:
             continue  # Este puerto no funcionó, probamos el siguiente
 
-    return None  # No encontramos ningún Arduino :(
+    return None  # No encontramos ningún Arduino 
 
 
 class SerialReader:
@@ -49,11 +46,11 @@ class SerialReader:
     Funciona así:
       1. Se conecta al puerto donde está el Arduino.
       2. Lanza un hilo en segundo plano que lee mensajes continuamente.
-      3. Cada mensaje recibido se parsea y se pasa a una función callback
+      3. Cada mensaje recibido se analiza y se pasa a una función callback
          según su tipo (comando de estado o número de cuadrante).
 
-    Los callbacks son funciones que tú defines fuera de esta clase y que
-    se llaman automáticamente cuando llega un mensaje relevante.
+    Los callbacks son funciones que se definen fuera de esta clase y que
+    se llaman automáticamente cuando llega un mensaje
     """
 
     def __init__(self, callback_cuadrante, callback_estado):
@@ -92,7 +89,7 @@ class SerialReader:
     def _leer(self):
         """
         Bucle infinito que corre en el hilo secundario.
-        Lee una línea del puerto serie, la limpia y la manda a parsear.
+        Lee una línea del puerto serie, la limpia y la manda a parsear
         Se detiene cuando self.activo se vuelve False.
         """
         while self.activo:
@@ -125,7 +122,7 @@ class SerialReader:
                        "C24S" → cuadrante 24 fue soltado
 
         Si el mensaje no encaja en ninguno de los dos formatos, se imprime
-        como desconocido (útil para depurar).
+        como desconocido.
         """
         # ¿Es un comando de estado conocido?
         if linea in ("CSTART", "CPAUSE", "CSTOP", "CFIN"):
@@ -155,7 +152,7 @@ class SerialReader:
 
     def detener(self):
         """
-        Para el hilo lector y cierra la conexión serie limpiamente.
+        Para el hilo lector y cierra la conexión serie.
         Llamar esto antes de cerrar el programa para no dejar el puerto ocupado.
         """
         self.activo = False  # El hilo lector verá esto en su próxima iteración y saldrá
