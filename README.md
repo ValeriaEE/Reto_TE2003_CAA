@@ -28,7 +28,10 @@ La Raspberry Pi puede mandar: `R` (run), `P` (pause), `S` (stop)
  
 ```bash
 pip install fastapi uvicorn pyserial
+source ~/OWO/venv/bin/activate
+cd ~/OWO
 uvicorn main:app --host 0.0.0.0 --port 8000
+
 ```
  
 Luego abrir `http://<IP-de-la-raspberry>:8000` en el navegador.
