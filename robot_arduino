@@ -1,0 +1,276 @@
+/*
+ * robot_arduino.ino
+ *
+ * Autora : Valeria Escalante
+ *
+ * PINES USADOS:
+ *  Motores (L298N):
+ *    IN1 (Motor A izq) → D2
+ *    IN2 (Motor A izq) → D3
+ *    IN3 (Motor B der) → D4
+ *    IN4 (Motor B der) → D5
+ *  Servo SG90          → D6
+ *  Sensor humedad AO   → A0
+ *  LCD 16x2 (sin i2c):
+ *    RS → D12
+ *    EN → D11
+ *    D4 → D7
+ *    D5 → D8
+ *    D6 → D13
+ *    D7 → A1 (pin 15)
+ *
+ * COMUNICACIÓN:
+ *  USB Arduino → Raspberry Pi 
+ *  Protocolo: CSTART\n, C##H\n / C##S\n, CPAUSE\n, CSTOP\n, CFIN\n
+ *  Comandos recibidos: 'R' (run), 'P' (pause), 'S' (stop)
+ */
+
+#include <LiquidCrystal.h>
+#include <Servo.h>
+
+// ── Pines ──────────────────────────────────────────────────
+#define PIN_IN1   2
+#define PIN_IN2   3
+#define PIN_IN3   4
+#define PIN_IN4   5
+#define PIN_ENA   9
+#define PIN_ENB   10
+#define PIN_SERVO 6
+#define PIN_HUM   A0
+
+// LCD: RS, EN, D4, D5, D6, D7
+LiquidCrystal lcd(12, 11, 7, 8, 13, A1);
+Servo myServo;
+
+// ── Tiempos y umbrales ─────────────────────────────────────
+#define TIEMPO_10CM    1200   // ms — calibrar
+#define TIEMPO_GIRO_90 800    // ms — calibrar
+#define UMBRAL_SECO    600    // 0-1023
+
+// ── Estado del robot ───────────────────────────────────────
+#define ESPERANDO  0
+#define CORRIENDO  1
+#define PAUSADO    2
+#define DETENIDO   3
+
+volatile byte estado_robot = ESPERANDO;
+
+// ── Variables de recorrido ─────────────────────────────────
+byte cuadrante_actual = 1;
+byte fila_actual      = 1;
+int  valor_humedad    = 0;
+char buf[17];
+
+// ══════════════════════════════════════════════════════════
+// MOTORES
+// ══════════════════════════════════════════════════════════
+void frenar() {
+  digitalWrite(PIN_IN1, LOW); digitalWrite(PIN_IN2, LOW);
+  digitalWrite(PIN_IN3, LOW); digitalWrite(PIN_IN4, LOW);
+}
+
+void avanzar() {
+  frenar();
+  digitalWrite(PIN_IN1, HIGH); digitalWrite(PIN_IN2, LOW);  // izq adelante
+  digitalWrite(PIN_IN3, HIGH); digitalWrite(PIN_IN4, LOW);  // der adelante
+}
+
+void girar_derecha() {
+  frenar();
+  digitalWrite(PIN_IN1, HIGH); digitalWrite(PIN_IN2, LOW);  // izq adelante
+  digitalWrite(PIN_IN3, LOW);  digitalWrite(PIN_IN4, HIGH); // der atrás
+}
+
+void girar_izquierda() {
+  frenar();
+  digitalWrite(PIN_IN1, LOW);  digitalWrite(PIN_IN2, HIGH); // izq atrás
+  digitalWrite(PIN_IN3, HIGH); digitalWrite(PIN_IN4, LOW);  // der adelante
+}
+
+// ══════════════════════════════════════════════════════════
+// SERVO
+// ══════════════════════════════════════════════════════════
+void servo_arriba() {
+  myServo.write(0);    // sensor retraído
+  delay(600);
+}
+
+void servo_abajo() {
+  myServo.write(180);  // sensor en tierra
+  delay(600);
+}
+
+// ══════════════════════════════════════════════════════════
+// UART — enviar resultado de cuadrante
+// ══════════════════════════════════════════════════════════
+void uart_enviar_estado(byte cuadrante, bool humedo) {
+  char msg[8];
+  sprintf(msg, "C%02d%c\n", cuadrante, humedo ? 'H' : 'S');
+  Serial.print(msg);
+}
+
+// ══════════════════════════════════════════════════════════
+// MANIOBRA VUELTA EN U
+// ══════════════════════════════════════════════════════════
+void realizar_giro_en_u() {
+  lcd.setCursor(0, 0); lcd.print("GIRANDO EN U... ");
+  if (fila_actual % 2 != 0) {
+    girar_derecha();   delay(TIEMPO_GIRO_90);
+    avanzar();         delay(TIEMPO_10CM);
+    girar_derecha();   delay(TIEMPO_GIRO_90);
+  } else {
+    girar_izquierda(); delay(TIEMPO_GIRO_90);
+    avanzar();         delay(TIEMPO_10CM);
+    girar_izquierda(); delay(TIEMPO_GIRO_90);
+  }
+  frenar();
+  delay(500);
+}
+
+// ══════════════════════════════════════════════════════════
+// LEER COMANDOS SERIE (no bloqueante)
+// ══════════════════════════════════════════════════════════
+void leer_comando() {
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    switch (cmd) {
+      case 'R':
+        if (estado_robot == ESPERANDO || estado_robot == PAUSADO)
+          estado_robot = CORRIENDO;
+        break;
+      case 'P':
+        if (estado_robot == CORRIENDO)
+          estado_robot = PAUSADO;
+        break;
+      case 'S':
+        estado_robot = DETENIDO;
+        break;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// SETUP
+// ══════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(9600);
+
+  // Motores
+  pinMode(PIN_IN1, OUTPUT); pinMode(PIN_IN2, OUTPUT);
+  pinMode(PIN_IN3, OUTPUT); pinMode(PIN_IN4, OUTPUT);
+  pinMode(PIN_ENA, OUTPUT); pinMode(PIN_ENB, OUTPUT);
+  analogWrite(PIN_ENA, 200); // velocidad ~78%
+  analogWrite(PIN_ENB, 200);
+  frenar();
+
+  // Servo
+  myServo.attach(PIN_SERVO);
+  servo_arriba();
+
+  // LCD
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0); lcd.print("SISTEMA LISTO   ");
+  lcd.setCursor(0, 1); lcd.print("ESPERANDO RUN...");
+
+  // Notifica RPi
+  Serial.println("CSTART");
+
+  // Espera comando R
+  while (estado_robot != CORRIENDO) {
+    leer_comando();
+  }
+
+  lcd.setCursor(0, 0); lcd.print("INICIANDO...    ");
+  delay(1000);
+}
+
+// ══════════════════════════════════════════════════════════
+// LOOP
+// ══════════════════════════════════════════════════════════
+void loop() {
+  leer_comando();
+
+  // ── Pausa ──
+  if (estado_robot == PAUSADO) {
+    Serial.println("CPAUSE");
+    lcd.setCursor(0, 0); lcd.print("** PAUSADO **   ");
+    lcd.setCursor(0, 1); lcd.print("ESPERA RUN...   ");
+    while (estado_robot == PAUSADO) leer_comando();
+  }
+
+  // ── Stop ──
+  if (estado_robot == DETENIDO) {
+    frenar();
+    Serial.println("CSTOP");
+    cuadrante_actual = 1;
+    fila_actual      = 1;
+    estado_robot     = ESPERANDO;
+    lcd.setCursor(0, 0); lcd.print("DETENIDO        ");
+    lcd.setCursor(0, 1); lcd.print("ESPERANDO RUN...");
+    while (estado_robot != CORRIENDO) leer_comando();
+  }
+
+  // ── Recorrido ──
+  if (cuadrante_actual <= 36) {
+
+    // 1. Avanzar al siguiente cuadrante
+    lcd.setCursor(0, 0); lcd.print("AVANZANDO...    ");
+    sprintf(buf, "Cuadrante: %2d   ", cuadrante_actual);
+    lcd.setCursor(0, 1); lcd.print(buf);
+    avanzar();
+    delay(TIEMPO_10CM);
+    frenar();
+    leer_comando();
+
+    // 2. Medir
+    lcd.setCursor(0, 0); lcd.print("MIDIENDO TIERRA ");
+    servo_abajo();
+    delay(500);
+    valor_humedad = analogRead(PIN_HUM);
+    bool humedo = (valor_humedad <= UMBRAL_SECO);
+    uart_enviar_estado(cuadrante_actual, humedo);
+
+    // 3. Mostrar resultado
+    lcd.setCursor(0, 1);
+    if (!humedo)
+      lcd.print("SECO - REGAR!   ");
+    else
+      lcd.print("HUMEDO - OK     ");
+    delay(2000);
+
+    servo_arriba();
+    leer_comando();
+
+    // 4. Giro en U al final de fila
+    if (cuadrante_actual % 6 == 0 && cuadrante_actual < 36) {
+      realizar_giro_en_u();
+      fila_actual++;
+    }
+
+    cuadrante_actual++;
+
+  } else {
+    // ── Fin del mapeo ──
+    frenar();
+    Serial.println("CFIN");
+    lcd.setCursor(0, 0); lcd.print("MAPEO COMPLETO  ");
+    lcd.setCursor(0, 1); lcd.print("FIN DEL VIAJE   ");
+
+    // Espera STOP para reiniciar
+    while (true) {
+      leer_comando();
+      if (estado_robot == DETENIDO) {
+        cuadrante_actual = 1;
+        fila_actual      = 1;
+        estado_robot     = ESPERANDO;
+        lcd.setCursor(0, 0); lcd.print("REINICIANDO...  ");
+        delay(1000);
+        Serial.println("CSTART");
+        while (estado_robot != CORRIENDO) leer_comando();
+        break;
+      }
+    }
+  }
+}
+
+
