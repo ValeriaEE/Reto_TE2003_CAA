@@ -10,14 +10,14 @@
  *    IN3 (Motor B der) → D4
  *    IN4 (Motor B der) → D5
  *  Servo SG90          → D6
- *  Sensor humedad AO   → A0
- *  LCD 16x2 (sin i2c):
+ *  Sensor humedad      → A0
+ *  LCD 16x2:
  *    RS → D12
  *    EN → D11
  *    D4 → D7
  *    D5 → D8
  *    D6 → D13
- *    D7 → A1 (pin 15)
+ *    D7 → A1 
  *
  * COMUNICACIÓN:
  *  USB Arduino → Raspberry Pi 
@@ -25,10 +25,10 @@
  *  Comandos recibidos: 'R' (run), 'P' (pause), 'S' (stop)
  */
 
-#include <LiquidCrystal.h>
-#include <Servo.h>
+#include <LiquidCrystal.h> //Libreria de arduino para LCD 
+#include <Servo.h> //Libreria de arduino para Servo
 
-// ── Pines ──────────────────────────────────────────────────
+//  Pines       
 #define PIN_IN1   2
 #define PIN_IN2   3
 #define PIN_IN3   4
@@ -42,34 +42,37 @@
 LiquidCrystal lcd(12, 11, 7, 8, 13, A1);
 Servo myServo;
 
-// ── Tiempos y umbrales ─────────────────────────────────────
-#define TIEMPO_10CM    1200   // ms — calibrar
-#define TIEMPO_GIRO_90 800    // ms — calibrar
+//  Tiempos y umbrales
+#define TIEMPO_10CM    1200   // Calibrar al gusto 
+#define TIEMPO_GIRO_90 800    // Calibrar al gusto 
 #define UMBRAL_SECO    600    // 0-1023
 
-// ── Estado del robot ───────────────────────────────────────
+// Estado del robot 
 #define ESPERANDO  0
 #define CORRIENDO  1
 #define PAUSADO    2
 #define DETENIDO   3
 
+// volatile porque puede cambiar repentinamente 
 volatile byte estado_robot = ESPERANDO;
 
-// ── Variables de recorrido ─────────────────────────────────
+//  Variables de recorrido
 byte cuadrante_actual = 1;
 byte fila_actual      = 1;
 int  valor_humedad    = 0;
 char buf[17];
 
-// ══════════════════════════════════════════════════════════
-// MOTORES
-// ══════════════════════════════════════════════════════════
+
+// Fenciones de movimiento 
+
 void frenar() {
+//Apagar todos los motores 
   digitalWrite(PIN_IN1, LOW); digitalWrite(PIN_IN2, LOW);
   digitalWrite(PIN_IN3, LOW); digitalWrite(PIN_IN4, LOW);
 }
 
 void avanzar() {
+//prender todos los motores 
   frenar();
   digitalWrite(PIN_IN1, HIGH); digitalWrite(PIN_IN2, LOW);  // izq adelante
   digitalWrite(PIN_IN3, HIGH); digitalWrite(PIN_IN4, LOW);  // der adelante
@@ -87,9 +90,9 @@ void girar_izquierda() {
   digitalWrite(PIN_IN3, HIGH); digitalWrite(PIN_IN4, LOW);  // der adelante
 }
 
-// ══════════════════════════════════════════════════════════
-// SERVO
-// ══════════════════════════════════════════════════════════
+
+// Fenciones de movimiento del servo 
+
 void servo_arriba() {
   myServo.write(0);    // sensor retraído
   delay(600);
@@ -100,18 +103,18 @@ void servo_abajo() {
   delay(600);
 }
 
-// ══════════════════════════════════════════════════════════
+
 // UART — enviar resultado de cuadrante
-// ══════════════════════════════════════════════════════════
+
 void uart_enviar_estado(byte cuadrante, bool humedo) {
   char msg[8];
   sprintf(msg, "C%02d%c\n", cuadrante, humedo ? 'H' : 'S');
   Serial.print(msg);
 }
 
-// ══════════════════════════════════════════════════════════
+
 // MANIOBRA VUELTA EN U
-// ══════════════════════════════════════════════════════════
+//Si el cuadrante es par gira a la derecha y si no a la izquierda
 void realizar_giro_en_u() {
   lcd.setCursor(0, 0); lcd.print("GIRANDO EN U... ");
   if (fila_actual % 2 != 0) {
@@ -127,9 +130,10 @@ void realizar_giro_en_u() {
   delay(500);
 }
 
-// ══════════════════════════════════════════════════════════
+
 // LEER COMANDOS SERIE (no bloqueante)
-// ══════════════════════════════════════════════════════════
+//Lee el comando y dependiendo de la leta leida da una respuesta 
+//'R' (run), 'P' (pause), 'S' (stop)
 void leer_comando() {
   if (Serial.available()) {
     char cmd = Serial.read();
@@ -149,9 +153,9 @@ void leer_comando() {
   }
 }
 
-// ══════════════════════════════════════════════════════════
+
 // SETUP
-// ══════════════════════════════════════════════════════════
+
 void setup() {
   Serial.begin(9600);
 
@@ -172,7 +176,7 @@ void setup() {
   lcd.setCursor(0, 0); lcd.print("SISTEMA LISTO   ");
   lcd.setCursor(0, 1); lcd.print("ESPERANDO RUN...");
 
-  // Notifica RPi
+  // Notifica RPi que esta lista 
   Serial.println("CSTART");
 
   // Espera comando R
@@ -184,12 +188,12 @@ void setup() {
   delay(1000);
 }
 
-// ══════════════════════════════════════════════════════════
+
 // LOOP
-// ══════════════════════════════════════════════════════════
+
 void loop() {
   leer_comando();
-
+//Si lee que llego pausado o detenido para y espera la sig instruccion 
   // ── Pausa ──
   if (estado_robot == PAUSADO) {
     Serial.println("CPAUSE");
@@ -211,6 +215,7 @@ void loop() {
   }
 
   // ── Recorrido ──
+//36 cuadrantes en la tabla (puede cambiar) 6x6
   if (cuadrante_actual <= 36) {
 
     // 1. Avanzar al siguiente cuadrante
@@ -241,7 +246,7 @@ void loop() {
     servo_arriba();
     leer_comando();
 
-    // 4. Giro en U al final de fila
+    // 4. Giro en U al final de fila 
     if (cuadrante_actual % 6 == 0 && cuadrante_actual < 36) {
       realizar_giro_en_u();
       fila_actual++;
