@@ -8,13 +8,29 @@ Acceder desde la red local:
   http://<IP-de-la-raspberry>:8000
 """
 
+# Framework principal para construir la API web
 from fastapi import FastAPI
+
+# HTMLResponse: para devolver páginas HTML directamente
+# StreamingResponse: para enviar datos en tiempo real (SSE)
 from fastapi.responses import HTMLResponse, StreamingResponse
+
+# Permite servir archivos estáticos
 from fastapi.staticfiles import StaticFiles
+
+# Módulo propio que maneja la lectura del puerto serial
 from serial_reader import SerialReader
+
+# Para operaciones asíncronas (necesario para SSE sin bloquear el servidor)
 import asyncio
+
+# Cola thread-safe para pasar datos del hilo serial al hilo de la API
 import queue
+
+# Para registrar timestamps en las lecturas del sensor
 import datetime
+
+# Para serializar/deserializar datos al formato JSON (envío al frontend)
 import json
 
 app = FastAPI()
